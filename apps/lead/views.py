@@ -642,9 +642,14 @@ class LeadCallViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         from apps.callminutes.services import charge_for_call
+        from rest_framework.exceptions import PermissionDenied
 
         lead = Lead.objects.get(pk=self.kwargs['lead_pk'])
-        branch = serializer.validated_data.get('branch') or lead.branch or getattr(self.request.user, 'branch', None)
+        user_branch = getattr(self.request.user, 'branch', None)
+        if not self.request.user.is_staff and user_branch and lead.branch and lead.branch != user_branch:
+            raise PermissionDenied('You do not have permission to log calls for leads in another branch.')
+
+        branch = serializer.validated_data.get('branch') or lead.branch or user_branch
         direction = serializer.validated_data.get('direction', 'outbound')
         duration_seconds = serializer.validated_data.get('duration_seconds', 0)
         # Inbound calls do not deduct minutes from counselor prepaid balance

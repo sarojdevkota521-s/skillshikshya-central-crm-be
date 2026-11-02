@@ -203,6 +203,9 @@ class GlobalCallListTests(APITestCase):
         # Verify formula injection mitigation: note starting with = is prefixed with '
         self.assertIn("'=1+1", content)
 
+    def test_branch_scoping_for_non_staff(self):
+        self.test_branch_scoping_non_staff_never_sees_other_branch_calls()
+
     def test_branch_scoping_non_staff_never_sees_other_branch_calls(self):
         from apps.branch.models import Branch
         from apps.lead.models import Lead, LeadCall
@@ -242,6 +245,25 @@ class GlobalCallListTests(APITestCase):
         exp_content = exp_resp.content.decode('utf-8')
         self.assertIn('Dharan Lead', exp_content)
         self.assertNotIn('Call Person', exp_content)
+
+        # 4. Detail endpoint: Dharan user cannot retrieve Biratnagar call directly by ID (404)
+        detail_resp = self.client.get(f'/api/calls/{self.recent_call.id}/')
+        self.assertEqual(detail_resp.status_code, 404)
+
+        # 5. Query param spoofing: Dharan user passing ?branch_id=Biratnagar is ignored
+        spoofed_resp = self.client.get(f'/api/calls/?branch_id={self.branch.id}')
+        self.assertEqual(spoofed_resp.status_code, 200)
+        spoofed_ids = [r['id'] for r in spoofed_resp.data['results']]
+        self.assertNotIn(self.recent_call.id, spoofed_ids)
+        self.assertIn(dharan_call.id, spoofed_ids)
+
+        # 6. Logging call: Dharan counselor cannot log a call to a Biratnagar lead (403)
+        log_resp = self.client.post(
+            f'/api/leads/{self.lead.id}/calls/',
+            {'call_timestamp': self.recent_call.call_timestamp.isoformat(), 'caller': 'Dharan Counselor', 'duration_seconds': 60},
+            format='json',
+        )
+        self.assertEqual(log_resp.status_code, 403)
 
     def test_staff_sees_all_branches_and_narrows_with_branch_id(self):
         from apps.branch.models import Branch
